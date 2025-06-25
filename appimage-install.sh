@@ -41,14 +41,14 @@ prompt() {
 # --- Validate argument
 if (( $# == 0 )); then
   error "No AppImage file provided."
-  warn "Usage: $0 path/to/AppImage"
+  warn "Usage: appimage-install path/to/AppImage"
   exit 1
 fi
 
 APPIMAGE="$1"
 if [[ ! -f "$APPIMAGE" ]]; then
   error "File not found: $APPIMAGE"
-  warn "Usage: $0 path/to/AppImage"
+  warn "Usage: appimage-install path/to/AppImage"
   exit 1
 fi
 
