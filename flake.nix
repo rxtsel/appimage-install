@@ -10,11 +10,12 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        scriptPath = builtins.toString ./appimage-installer.sh;
 
         appimage-installer = pkgs.writeShellApplication {
           name = "appimage-install";
           runtimeInputs = with pkgs; [ appimage-run p7zip ];
-          text = builtins.readFile ./appimage-install.sh;
+          text = builtins.readFile scriptPath;
         };
       in {
         packages.default = appimage-installer;
