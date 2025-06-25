@@ -5,6 +5,9 @@ It automatically moves the AppImage to a designated folder, ensures it is
 executable, extracts the icon, and creates a `.desktop` launcher for integration
 with your desktop environment (e.g., application menus, launchers).
 
+![1750875225_grim](https://github.com/user-attachments/assets/ffa0aca9-728d-4498-8134-e6bd29316e1d)
+
+
 ## Features
 
 - Moves `.AppImage` files to `~/AppImages`
