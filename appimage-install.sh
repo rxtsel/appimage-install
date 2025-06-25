@@ -48,7 +48,6 @@ fi
 APPIMAGE="$1"
 if [[ ! -f "$APPIMAGE" ]]; then
   error "File not found: $APPIMAGE"
-  warn "USAGE: appimage-install path/to/AppImage"
   exit 1
 fi
 
