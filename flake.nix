@@ -1,5 +1,5 @@
 {
-  description = "rxtsel's AppImage Installer shell script";
+  description = "rxtsel's AppImage Install shell script";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -12,26 +12,25 @@
         pkgs = nixpkgs.legacyPackages.${system};
         scriptPath = builtins.toString ./appimage-installer.sh;
 
-        appimage-installer = pkgs.writeShellApplication {
+        appimage-install = pkgs.writeShellApplication {
           name = "appimage-install";
           runtimeInputs = with pkgs; [ appimage-run p7zip ];
           text = builtins.readFile scriptPath;
         };
       in {
-        packages.default = appimage-installer;
+        packages.default = appimage-install;
 
         apps.default = {
           type = "app";
-          program = "${appimage-installer}/bin/appimage-install";
+          program = "${appimage-install}/bin/appimage-install";
         };
 
         devShells.default = pkgs.mkShell {
           packages = [
-            appimage-installer
+            appimage-install
             pkgs.appimage-run
             pkgs.p7zip
           ];
         };
       });
 }
-

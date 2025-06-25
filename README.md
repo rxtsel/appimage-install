@@ -1,4 +1,4 @@
-# AppImage Installer
+# AppImage Install
 
 A simple shell script to install `.AppImage` applications on any Linux system.
 It automatically moves the AppImage to a designated folder, ensures it is
@@ -28,21 +28,21 @@ with your desktop environment (e.g., application menus, launchers).
 1. Clone the repository:
 
     ```bash
-    git clone https://github.com/rxtsel/appimage-installer
-    cd appimage-installer
+    git clone https://github.com/rxtsel/appimage-install
+    cd appimage-install
     ```
 
 2. Make the script executable:
 
     ```bash
-    chmod +x install-appimage.sh
+    chmod +x appimage-install.sh
     ```
 
 3. Move the script to a location in your `$PATH`:
 
     ```bash
     mkdir -p ~/.local/bin
-    cp install-appimage.sh ~/.local/bin/appimage-install
+    cp appimage-install.sh ~/.local/bin/appimage-install
     ```
 
 4. Ensure `~/.local/bin` is in your `$PATH`:
