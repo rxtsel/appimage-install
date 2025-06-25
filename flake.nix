@@ -14,7 +14,7 @@
         appimage-installer = pkgs.writeShellApplication {
           name = "appimage-install";
           runtimeInputs = with pkgs; [ appimage-run p7zip ];
-          text = builtins.readFile ./install-appimage.sh;
+          text = builtins.readFile ./appimage-install.sh;
         };
       in {
         packages.default = appimage-installer;
