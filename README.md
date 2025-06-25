@@ -7,7 +7,6 @@ with your desktop environment (e.g., application menus, launchers).
 
 ![1750875225_grim](https://github.com/user-attachments/assets/ffa0aca9-728d-4498-8134-e6bd29316e1d)
 
-
 ## Features
 
 - Moves `.AppImage` files to `~/AppImages`
@@ -24,6 +23,8 @@ with your desktop environment (e.g., application menus, launchers).
 - Desktop environment that respects `.desktop` files
 
 ## Installation
+
+### Option 1: Traditional Installation (Any Linux Distribution)
 
 1. Clone the repository:
 
@@ -61,37 +62,51 @@ with your desktop environment (e.g., application menus, launchers).
           source ~/.zshrc
         ```
 
-> [!IMPORTANT]
-> This script use `APPIMAGE_EXEC` variable with `appimage-run` by default for
-run in NixOS, but you can change it to run `.AppImage` files directly if
-your system does not require `appimage-run`.
+### Option 2: Nix Flake Installation (Recommended for NixOS/Nix users)
 
-By default, the script uses:
+#### Direct Installation from GitHub
 
-```sh
-APPIMAGE_EXEC="appimage-run"
+Install directly using the flake:
+
+```bash
+nix profile install github:rxtsel/appimage-install
 ```
 
-This allows sandboxed execution of `.AppImage` files.
+#### Local Development/Testing
 
-**If your system does **not** require or use `appimage-run`**
+1. Clone and enter the repository:
 
-Edit the script and change the line to:
+    ```bash
+    git clone https://github.com/rxtsel/appimage-install
+    cd appimage-install
+    ```
 
-```sh
-APPIMAGE_EXEC=""
-```
+2. Enter the development shell (includes all dependencies):
 
-This will run the `.AppImage` directly.
+    ```bash
+    nix develop
+    ```
 
----
+3. Or run directly:
 
-### For NixOS
+    ```bash
+    nix run . -- /path/to/your-app.AppImage
+    ```
 
-Add this to your `home.nix` (if using Home Manager):
+#### Home Manager Integration
+
+Add to your `home.nix`:
 
 ```nix
-home.sessionPath = [ "$HOME/.local/bin" ];
+{
+  # Add the flake as an input in your flake.nix
+  inputs.appimage-install.url = "github:rxtsel/appimage-install";
+
+  # In your home.nix configuration:
+  home.packages = [
+    inputs.appimage-install.packages.${system}.default
+  ];
+}
 ```
 
 Then apply changes:
@@ -100,23 +115,51 @@ Then apply changes:
 home-manager switch
 ```
 
-Ensure `appimage-run` is installed:
+#### NixOS System Configuration
+
+Add to your `configuration.nix`:
 
 ```nix
-home.packages = with pkgs; [
-  appimage-run
-  p7zip
-];
+{
+  # Add as flake input, then in your configuration:
+  environment.systemPackages = [
+    inputs.appimage-install.packages.${system}.default
+  ];
+}
 ```
 
-Alternatively, run:
+#### Manual Nix Installation (without flakes)
+
+If you prefer not to use flakes, install the dependencies manually:
 
 ```bash
-nix profile install nixpkgs#appimage-run
-nix profile install nixpkgs#p7zip
+nix profile install nixpkgs#appimage-run nixpkgs#p7zip
 ```
 
----
+Then follow the traditional installation method above.
+
+## Configuration
+
+> [!IMPORTANT]
+> This script uses `APPIMAGE_EXEC` variable with `appimage-run` by default for
+> sandboxed execution (especially useful on NixOS), but you can change it to run 
+> `.AppImage` files directly if your system doesn't require `appimage-run`.
+
+By default, the script uses:
+
+```sh
+APPIMAGE_EXEC="appimage-run"
+```
+
+**If your system does NOT require `appimage-run`:**
+
+Edit the script and change line 8 to:
+
+```sh
+APPIMAGE_EXEC=""
+```
+
+This will execute the `.AppImage` directly without sandboxing.
 
 ## Usage
 
@@ -133,10 +176,16 @@ You will be prompted for:
 
 After completion, the application will appear in your system menu.
 
----
-
 ## Example
 
 ```bash
 appimage-install ~/Downloads/Obsidian-1.5.0.AppImage
 ```
+
+## Dependencies
+
+The Nix flake automatically provides all required dependencies:
+- `appimage-run` - For sandboxed AppImage execution
+- `p7zip` - For icon extraction from AppImage files
+
+For non-Nix systems, ensure these are installed through your package manager.
