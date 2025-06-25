@@ -34,28 +34,28 @@ warn() {
 
 prompt() {
   local message="$1"
-  shift
-  printf "${YELLOW}$PADDING${RESET} %s" "[?]" "$(printf "%s" "$message" "$@")"
+  local arg="$2"
+  printf "${YELLOW}$PADDING${RESET} %s" "[?]" "$message [$arg]: "
 }
 
 # --- Validate argument
 if (( $# == 0 )); then
   error "No AppImage file provided."
-  warn "Usage: appimage-install path/to/AppImage"
+  warn "USAGE: appimage-install path/to/AppImage"
   exit 1
 fi
 
 APPIMAGE="$1"
 if [[ ! -f "$APPIMAGE" ]]; then
   error "File not found: $APPIMAGE"
-  warn "Usage: appimage-install path/to/AppImage"
+  warn "USAGE: appimage-install path/to/AppImage"
   exit 1
 fi
 
 FILENAME=$(basename "$APPIMAGE")
 DEFAULT_NAME="${FILENAME%%.*}"
 
-prompt "How should this application appear in your system menus? [%s]: " "$DEFAULT_NAME"
+prompt "How should this application appear in your system menus?" "$DEFAULT_NAME"
 read -r DISPLAY_NAME
 DISPLAY_NAME="${DISPLAY_NAME:-$DEFAULT_NAME}"
 
