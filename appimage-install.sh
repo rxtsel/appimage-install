@@ -28,16 +28,27 @@ error() {
   printf "${RED}$PADDING${RESET} %s\n" "[ERROR]" "$1" >&2
 }
 
+warn() {
+  printf "${YELLOW}$PADDING${RESET} %s\n" "[WARN]" "$1"
+}
+
 prompt() {
   local message="$1"
   shift
-  printf "${YELLOW}$PADDING${RESET} %s" "[?]" "$(printf "$message" "$@")"
+  printf "${YELLOW}$PADDING${RESET} %s" "[?]" "$(printf "%s" "$message" "$@")"
 }
+
+# --- Validate argument
+if (( $# == 0 )); then
+  error "No AppImage file provided."
+  warn "Usage: $0 path/to/AppImage"
+  exit 1
+fi
 
 APPIMAGE="$1"
 if [[ ! -f "$APPIMAGE" ]]; then
   error "File not found: $APPIMAGE"
-  echo "Usage: $0 path/to/AppImage"
+  warn "Usage: $0 path/to/AppImage"
   exit 1
 fi
 
@@ -45,10 +56,10 @@ FILENAME=$(basename "$APPIMAGE")
 DEFAULT_NAME="${FILENAME%%.*}"
 
 prompt "How should this application appear in your system menus? [%s]: " "$DEFAULT_NAME"
-read DISPLAY_NAME
+read -r DISPLAY_NAME
 DISPLAY_NAME="${DISPLAY_NAME:-$DEFAULT_NAME}"
 
-# Sanitize name for filenames
+# --- Generate file name ID
 FILE_ID=$(echo "$DISPLAY_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/--*/-/g' | sed 's/^-//;s/-$//')
 RENAMED_APPIMAGE="$DESTDIR/$FILE_ID.AppImage"
 DESKTOP_FILE="$APPDIR/$FILE_ID.desktop"
@@ -62,13 +73,13 @@ else
   log "Using existing AppImage directory at $DESTDIR"
 fi
 
-# --- Ensure it's executable
+# --- Make executable
 if [[ ! -x "$APPIMAGE" ]]; then
   chmod +x "$APPIMAGE"
   success "Execution permission applied to $APPIMAGE"
 fi
 
-# --- Move and rename AppImage if needed
+# --- Move and rename AppImage
 if [[ "$APPIMAGE" != "$RENAMED_APPIMAGE" ]]; then
   if [[ -f "$RENAMED_APPIMAGE" ]]; then
     error "An AppImage with name '$FILE_ID.AppImage' already exists in $DESTDIR."
@@ -80,7 +91,7 @@ else
   success "AppImage already in the correct location."
 fi
 
-# --- Ensure renamed file is executable too
+# --- Ensure it's still executable
 if [[ ! -x "$RENAMED_APPIMAGE" ]]; then
   chmod +x "$RENAMED_APPIMAGE"
   success "Execution permission applied to $RENAMED_APPIMAGE"
@@ -127,7 +138,7 @@ success ".desktop launcher created at $DESKTOP_FILE"
 
 # --- Optional edit
 prompt "Do you want to manually edit the .desktop file? [y/N]: "
-read EDIT_DESKTOP
+read -r EDIT_DESKTOP
 if [[ "$EDIT_DESKTOP" =~ ^[Yy]$ ]]; then
   ${EDITOR:-nano} "$DESKTOP_FILE"
 fi
@@ -138,3 +149,4 @@ if command -v update-desktop-database &> /dev/null; then
 fi
 
 success "$DISPLAY_NAME was successfully installed and integrated."
+
