@@ -69,7 +69,7 @@ with your desktop environment (e.g., application menus, launchers).
 Install directly using the flake:
 
 ```bash
-nix profile install github:rxtsel/appimage-install
+nix profile install github:rxtsel/appimage-install --no-write-lock-file
 ```
 
 #### Local Development/Testing
