@@ -6,18 +6,33 @@
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      flake-utils,
+    }:
+    flake-utils.lib.eachDefaultSystem (
+      system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
         scriptPath = builtins.toString ./appimage-install.sh;
 
         appimage-install = pkgs.writeShellApplication {
           name = "appimage-install";
-          runtimeInputs = with pkgs; [ appimage-run p7zip ];
-          text = builtins.readFile scriptPath;
+          runtimeInputs = with pkgs; [
+            appimage-run
+            p7zip
+          ];
+
+          # Ensure the script always uses the packaged appimage-run
+          text = ''
+            export APPIMAGE_EXEC="${pkgs.appimage-run}/bin/appimage-run"
+            ${builtins.readFile scriptPath}
+          '';
         };
-      in {
+      in
+      {
         packages.default = appimage-install;
 
         apps.default = {
@@ -32,5 +47,6 @@
             pkgs.p7zip
           ];
         };
-      });
+      }
+    );
 }
