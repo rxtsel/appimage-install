@@ -5,6 +5,8 @@ Moves the AppImage to a dedicated folder, sets executable permissions,
 extracts the icon, and creates a `.desktop` launcher for desktop environment
 integration (application menus, launchers, etc).
 
+<img width="1266" height="719" alt="image" src="https://github.com/user-attachments/assets/8ea4d054-3c61-4e70-9be5-d34334740f3c" />
+
 ## Features
 
 - Moves `.AppImage` files to `~/AppImages`
