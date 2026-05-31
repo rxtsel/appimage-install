@@ -25,11 +25,12 @@ else
 fi
 
 # SC2059: never put variables in printf format strings — pass them as %s args instead.
-log()     { printf '%s%-8s%s %s\n' "$CYAN"   "[*]"     "$RESET" "$1"; }
-success() { printf '%s%-8s%s %s\n' "$GREEN"  "[OK]"    "$RESET" "$1"; }
-warn()    { printf '%s%-8s%s %s\n' "$YELLOW" "[WARN]"  "$RESET" "$1"; }
-error()   { printf '%s%-8s%s %s\n' "$RED"    "[ERROR]" "$RESET" "$1" >&2; }
-info()    { printf '%s%-8s%s %s\n' "$BOLD"   "[INFO]"  "$RESET" "$1"; }
+# Tags padded to [ERROR] width so all messages align on the same column.
+log()     { printf '%s[*]   %s %s\n' "$CYAN"   "$RESET" "$1"; }
+success() { printf '%s[OK]  %s %s\n' "$GREEN"  "$RESET" "$1"; }
+warn()    { printf '%s[WARN]%s %s\n' "$YELLOW" "$RESET" "$1"; }
+error()   { printf '%s[ERR] %s %s\n' "$RED"    "$RESET" "$1" >&2; }
+info()    { printf '%s[INFO]%s %s\n' "$BOLD"   "$RESET" "$1"; }
 
 # ---------------------------------------------------------------------------
 # Cleanup trap
@@ -273,7 +274,7 @@ main() {
   appimage="$(cd "$(dirname "$appimage")" && pwd)/$(basename "$appimage")"
 
   printf '\n%sAppImage Installer%s\n' "$BOLD" "$RESET"
-  printf '%s\n\n' "────────────────────────────────────────"
+  printf '%s\n\n' "──────────────────"
 
   check_dependencies
 
@@ -387,9 +388,8 @@ EOF
     log "Desktop database updated."
   fi
 
-  printf '\n%s\n' "────────────────────────────────────────"
-  success "${display_name} installed and integrated successfully."
   printf '\n'
+  success "${display_name} installed and integrated successfully."
 }
 
 main "$@"
