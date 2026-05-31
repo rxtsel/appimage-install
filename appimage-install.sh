@@ -112,7 +112,7 @@ extract_appimage_payload() {
 # Reads directly from /dev/tty to avoid any subshell stdout capture issues.
 prompt_yn() {
   local answer
-  printf '%s%-8s%s %s ' "$YELLOW" "[?]" "$RESET" "$1" >/dev/tty
+  printf '%s%-6s%s %s ' "$YELLOW" "[?]" "$RESET" "$1" >/dev/tty
   read -r answer </dev/tty
   case "${answer,,}" in
     y|yes) return 0 ;;
@@ -124,7 +124,7 @@ prompt_yn() {
 # Stores result in varname — avoids subshell so read works correctly.
 prompt_value() {
   local _pv_var="$1" _pv_msg="$2" _pv_default="$3" _pv_answer
-  printf '%s%-8s%s %s [%s]: ' "$YELLOW" "[?]" "$RESET" "$_pv_msg" "$_pv_default" >/dev/tty
+  printf '%s%-6s%s %s [%s]: ' "$YELLOW" "[?]" "$RESET" "$_pv_msg" "$_pv_default" >/dev/tty
   read -r _pv_answer </dev/tty
   # Assign to the caller's variable by name (no subshell needed)
   printf -v "$_pv_var" '%s' "${_pv_answer:-$_pv_default}"
