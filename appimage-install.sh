@@ -1,258 +1,395 @@
-#!/usr/bin/env sh
-
+#!/usr/bin/env bash
 # appimage-install: Install an AppImage into ~/.local with desktop entry + icon extraction.
-# Compatible with POSIX sh (works in dash, bash, zsh in sh-mode, busybox sh).
-# Requires: appimage-run, p7zip (7z). Optional: bsdtar, update-desktop-database.
+# Requires: p7zip (7z) or bsdtar. Optional: appimage-run, update-desktop-database.
+set -euo pipefail
 
-set -eu
-
+# ---------------------------------------------------------------------------
+# Directories
+# ---------------------------------------------------------------------------
 APPDIR="${HOME}/.local/share/applications"
 ICONDIR="${HOME}/.local/share/icons"
 DESTDIR="${HOME}/AppImages"
 
-# Prefer absolute appimage-run if present in PATH anyway.
-APPIMAGE_EXEC="${APPIMAGE_EXEC:-appimage-run}"
+# ---------------------------------------------------------------------------
+# ANSI colors (disabled automatically for non-terminals)
+# ---------------------------------------------------------------------------
+if [[ -t 1 ]]; then
+  RED=$'\033[31m'
+  GREEN=$'\033[32m'
+  YELLOW=$'\033[33m'
+  CYAN=$'\033[36m'
+  BOLD=$'\033[1m'
+  RESET=$'\033[0m'
+else
+  RED="" GREEN="" YELLOW="" CYAN="" BOLD="" RESET=""
+fi
 
-# ANSI colors (best-effort; if terminal doesn't support, it will just print raw)
-RED="$(printf '\033[31m')"
-GREEN="$(printf '\033[32m')"
-YELLOW="$(printf '\033[33m')"
-RESET="$(printf '\033[0m')"
+# SC2059: never put variables in printf format strings — pass them as %s args instead.
+log()     { printf '%s%-8s%s %s\n' "$CYAN"   "[*]"     "$RESET" "$1"; }
+success() { printf '%s%-8s%s %s\n' "$GREEN"  "[OK]"    "$RESET" "$1"; }
+warn()    { printf '%s%-8s%s %s\n' "$YELLOW" "[WARN]"  "$RESET" "$1"; }
+error()   { printf '%s%-8s%s %s\n' "$RED"    "[ERROR]" "$RESET" "$1" >&2; }
+info()    { printf '%s%-8s%s %s\n' "$BOLD"   "[INFO]"  "$RESET" "$1"; }
 
-PADDING="%-8s"
-
-log() {
-  # shellcheck disable=SC2059
-  printf "${PADDING} %s\n" "[*]" "$1"
+# ---------------------------------------------------------------------------
+# Cleanup trap
+# ---------------------------------------------------------------------------
+TMPWORK=""
+cleanup() {
+  [[ -n "$TMPWORK" && -d "$TMPWORK" ]] && rm -rf "$TMPWORK"
 }
+trap cleanup EXIT
 
-success() {
-  # shellcheck disable=SC2059
-  printf "${GREEN}${PADDING}${RESET} %s\n" "[OK]" "$1"
-}
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+have_cmd() { command -v "$1" &>/dev/null; }
 
-warn() {
-  # shellcheck disable=SC2059
-  printf "${YELLOW}${PADDING}${RESET} %s\n" "[WARN]" "$1"
-}
-
-error() {
-  # shellcheck disable=SC2059
-  printf "${RED}${PADDING}${RESET} %s\n" "[ERROR]" "$1" >&2
-}
-
-# prompt "Message" ["DefaultValue"]
-prompt() {
-  message="$1"
-  default="${2:-}"
-  if [ -n "$default" ]; then
-    # shellcheck disable=SC2059
-    printf "${YELLOW}${PADDING}${RESET} %s" "[?]" "$message [$default]: "
-  else
-    # shellcheck disable=SC2059
-    printf "${YELLOW}${PADDING}${RESET} %s" "[?]" "$message "
-  fi
-}
-
-# read_line varname
-read_line() {
-  varname="$1"
-  IFS= read -r _line || _line=""
-  # POSIX-safe "assign by name"
-  eval "$varname=\$_line"
-}
-
-have_cmd() {
-  command -v "$1" >/dev/null 2>&1
-}
-
-# mktemp_dir: create a temp dir in a portable way
-mktemp_dir() {
+make_tmpdir() {
   if have_cmd mktemp; then
-    mktemp -d 2>/dev/null && return 0
+    mktemp -d
+  else
+    local d="${TMPDIR:-/tmp}/appimage-install.$$"
+    mkdir -p "$d"
+    printf '%s' "$d"
   fi
-  # fallback
-  d="${TMPDIR:-/tmp}/appimage-install.$$"
-  (umask 077 && mkdir -p "$d") || return 1
-  printf '%s\n' "$d"
+}
+
+# Derive a clean display name from a raw filename stem.
+# OnlySend_0.1.1_amd64     →  OnlySend
+# Signal-Desktop-6.2.0     →  Signal Desktop
+# balenaEtcher-1.18.11-x64 →  balenaEtcher
+# AppFlowy-0.5.5-linux      →  AppFlowy
+clean_display_name() {
+  local name="$1"
+  # Strip common arch/OS suffixes (longer patterns first to avoid partial matches)
+  local suffixes=(
+    _x86_64 -x86_64 _amd64  -amd64
+    _arm64  -arm64  _aarch64 -aarch64
+    _i386   -i386   _i686   -i686
+    _x64    -x64    _x32    -x32
+    _linux  -linux  _Linux  -Linux
+    _AppImage -AppImage
+  )
+  for s in "${suffixes[@]}"; do
+    name="${name//${s}/}"
+  done
+  # Strip version-like segments: _0.1.2  _v2.3  -1.0.0  -v3  _0  etc.
+  name="$(printf '%s' "$name" | sed -E 's/[_-][vV]?[0-9][^_-]*//g')"
+  # Replace remaining _ and - with space, collapse runs, trim edges
+  name="$(printf '%s' "$name" | tr '_-' '  ' | sed -E 's/  +/ /g' | sed -E 's/^ +| +$//')"
+  printf '%s' "$name"
 }
 
 sanitize_id() {
-  # Lowercase, replace non-alnum with '-', collapse '-', trim '-'
-  # Uses only POSIX tools (tr + sed).
+  # Lowercase, replace non-alnum with '-', collapse runs, trim edges.
+  # Input must be plain text — never pass colored strings here.
   printf '%s' "$1" \
     | tr '[:upper:]' '[:lower:]' \
-    | sed -e 's/[^a-z0-9]/-/g' -e 's/--*/-/g' -e 's/^-//' -e 's/-$//'
+    | sed -e 's/[^a-z0-9]/-/g' -e 's/-\{2,\}/-/g' -e 's/^-//' -e 's/-$//'
 }
 
 first_icon_in_dir() {
-  # Find first png/svg; "find" is widely available on NixOS; still guard.
-  d="$1"
-  if have_cmd find; then
-    find "$d" -type f \( -iname '*.png' -o -iname '*.svg' \) 2>/dev/null | sed -n '1p'
-  else
-    printf '%s\n' ""
-  fi
+  local d="$1"
+  find "$d" -type f \( -iname '*.png' -o -iname '*.svg' \) 2>/dev/null \
+    | sort \
+    | head -n1
 }
 
 extract_appimage_payload() {
-  appimage="$1"
-  outdir="$2"
-
-  # Prefer 7z if present (you include p7zip in runtimeInputs)
+  local appimage="$1" outdir="$2"
   if have_cmd 7z; then
-    7z x "$appimage" "-o$outdir" >/dev/null 2>&1 || true
-    return 0
+    7z x "$appimage" "-o${outdir}" &>/dev/null || true
+  elif have_cmd bsdtar; then
+    bsdtar -xf "$appimage" -C "$outdir" &>/dev/null || true
+  else
+    warn "No extractor found (7z / bsdtar). Skipping icon extraction."
   fi
+}
 
-  # Fallback: bsdtar if present
-  if have_cmd bsdtar; then
-    bsdtar -xf "$appimage" -C "$outdir" >/dev/null 2>&1 || true
-    return 0
-  fi
+# prompt_yn "Question [y/N]" — returns 0 for yes, 1 for no
+# Reads directly from /dev/tty to avoid any subshell stdout capture issues.
+prompt_yn() {
+  local answer
+  printf '%s%-8s%s %s ' "$YELLOW" "[?]" "$RESET" "$1" >/dev/tty
+  read -r answer </dev/tty
+  case "${answer,,}" in
+    y|yes) return 0 ;;
+    *)     return 1 ;;
+  esac
+}
 
-  warn "No extractor found (7z/bsdtar). Skipping icon extraction."
-  return 0
+# prompt_value varname "Message" "default"
+# Stores result in varname — avoids subshell so read works correctly.
+prompt_value() {
+  local _pv_var="$1" _pv_msg="$2" _pv_default="$3" _pv_answer
+  printf '%s%-8s%s %s [%s]: ' "$YELLOW" "[?]" "$RESET" "$_pv_msg" "$_pv_default" >/dev/tty
+  read -r _pv_answer </dev/tty
+  # Assign to the caller's variable by name (no subshell needed)
+  printf -v "$_pv_var" '%s' "${_pv_answer:-$_pv_default}"
 }
 
 usage() {
-  warn "USAGE: appimage-install path/to/AppImage"
+  printf '\n%sUsage:%s\n' "$BOLD" "$RESET"
+  printf '  appimage-install <path/to/App.AppImage>\n\n'
 }
 
-# --- Validate arguments
-if [ "$#" -lt 1 ]; then
-  error "No AppImage file provided."
-  usage
-  exit 1
-fi
+# ---------------------------------------------------------------------------
+# OS detection for targeted install hints
+# ---------------------------------------------------------------------------
+detect_os() {
+  if [[ -f /etc/os-release ]]; then
+    # shellcheck source=/dev/null
+    source /etc/os-release
+    printf '%s' "${ID:-unknown}"
+  elif have_cmd uname; then
+    printf '%s' "$(uname -s | tr '[:upper:]' '[:lower:]')"
+  else
+    printf '%s' "unknown"
+  fi
+}
 
-APPIMAGE="$1"
-if [ ! -f "$APPIMAGE" ]; then
-  error "File not found: $APPIMAGE"
-  exit 1
-fi
+# install_hint "pkg-nixos" "pkg-arch" "pkg-debian" "pkg-fedora"
+# Prints a ready-to-run install command based on the detected OS.
+install_hint() {
+  local nix_pkg="$1" arch_pkg="$2" deb_pkg="$3" fed_pkg="$4"
+  local os
+  os="$(detect_os)"
+  case "$os" in
+    nixos)
+      printf '  $ nix profile install nixpkgs#%s\n' "$nix_pkg" ;;
+    arch|manjaro|endeavouros|garuda)
+      printf '  $ sudo pacman -S %s\n' "$arch_pkg" ;;
+    ubuntu|debian|linuxmint|pop)
+      printf '  $ sudo apt install %s\n' "$deb_pkg" ;;
+    fedora|rhel|centos|rocky|alma)
+      printf '  $ sudo dnf install %s\n' "$fed_pkg" ;;
+    opensuse*|sles)
+      printf '  $ sudo zypper install %s\n' "$deb_pkg" ;;
+    *)
+      # Show all options when OS is unknown
+      printf '  NixOS:  nix profile install nixpkgs#%s\n' "$nix_pkg"
+      printf '  Arch:   sudo pacman -S %s\n' "$arch_pkg"
+      printf '  Debian: sudo apt install %s\n' "$deb_pkg"
+      printf '  Fedora: sudo dnf install %s\n' "$fed_pkg"
+      ;;
+  esac
+}
 
-# Ensure required tools exist
-if ! have_cmd "$APPIMAGE_EXEC"; then
-  warn "Command not found: ${APPIMAGE_EXEC}"
-  warn "Your .desktop will use Exec=${APPIMAGE_EXEC} \"...\""
-  warn "Make sure appimage-run is installed and available in PATH."
-fi
+# ---------------------------------------------------------------------------
+# Dependency detection
+# ---------------------------------------------------------------------------
+detect_extractor() {
+  if have_cmd 7z;     then printf '7z';     return; fi
+  if have_cmd bsdtar; then printf 'bsdtar'; return; fi
+  printf ''
+}
 
-FILENAME=$(basename "$APPIMAGE")
-DEFAULT_NAME=${FILENAME%%.*}
+# Detects whether appimage-run is needed on this system.
+needs_appimage_run() {
+  # Explicitly set to empty → user opted out
+  if [[ "${APPIMAGE_EXEC:-UNSET}" == "" ]]; then
+    return 1
+  fi
+  # Explicitly set to a value → honor it
+  if [[ "${APPIMAGE_EXEC:-UNSET}" != "UNSET" ]]; then
+    return 0
+  fi
+  # Auto-detect: NixOS
+  if [[ -f /etc/os-release ]] && grep -qi 'nixos' /etc/os-release; then
+    return 0
+  fi
+  # Auto-detect: missing dynamic linker (immutable/container systems)
+  local ld
+  ld=$(find /lib /lib64 -maxdepth 1 -name 'ld-linux*' 2>/dev/null | head -n1 || true)
+  [[ -z "$ld" ]]
+}
 
-prompt "How should this application appear in your system menus?" "$DEFAULT_NAME"
-read_line DISPLAY_NAME
-if [ -z "${DISPLAY_NAME:-}" ]; then
-  DISPLAY_NAME="$DEFAULT_NAME"
-fi
+check_dependencies() {
+  local missing_critical=() missing_optional=()
 
-FILE_ID=$(sanitize_id "$DISPLAY_NAME")
-if [ -z "$FILE_ID" ]; then
-  # Fallback if name was only symbols/spaces
-  FILE_ID=$(sanitize_id "$DEFAULT_NAME")
-fi
+  # --- appimage-run (conditional) ---
+  if needs_appimage_run; then
+    APPIMAGE_EXEC="${APPIMAGE_EXEC:-appimage-run}"
+    if ! have_cmd "$APPIMAGE_EXEC"; then
+      missing_critical+=("appimage-run")
+    fi
+  else
+    APPIMAGE_EXEC=""
+  fi
 
-RENAMED_APPIMAGE="${DESTDIR}/${FILE_ID}.AppImage"
-DESKTOP_FILE="${APPDIR}/${FILE_ID}.desktop"
+  # --- extractor ---
+  if [[ -z "$(detect_extractor)" ]]; then
+    missing_optional+=("p7zip")
+  fi
 
-mkdir -p "$APPDIR" "$ICONDIR"
+  # --- Critical: must have to continue ---
+  if [[ ${#missing_critical[@]} -gt 0 ]]; then
+    printf '\n'
+    error "Missing required dependency: appimage-run"
+    printf '\n'
+    warn  "On this system, AppImages cannot run without appimage-run."
+    warn  "Install it with:"
+    printf '\n'
+    install_hint "appimage-run" "appimage-run" "appimage-run" "appimage-run" | while IFS= read -r line; do
+      info "$line"
+    done
+    printf '\n'
+    if prompt_yn "Continue anyway and fix Exec= manually later? [y/N]"; then
+      warn "Proceeding. Remember to fix Exec= in the generated .desktop file."
+    else
+      exit 1
+    fi
+  fi
 
-if [ ! -d "$DESTDIR" ]; then
-  mkdir -p "$DESTDIR"
-  success "Created AppImage directory at $DESTDIR"
-else
-  log "Using existing AppImage directory at $DESTDIR"
-fi
+  # --- Optional: warn but never block ---
+  if [[ ${#missing_optional[@]} -gt 0 ]]; then
+    warn "p7zip not found — icon extraction will be skipped."
+    warn "Install with:"
+    install_hint "p7zip" "p7zip" "p7zip-full" "p7zip" | while IFS= read -r line; do
+      warn "  ${line}"
+    done
+    printf '\n'
+  fi
+}
 
-# Make executable
-if [ ! -x "$APPIMAGE" ]; then
-  chmod +x "$APPIMAGE"
-  success "Execution permission applied to $APPIMAGE"
-fi
-
-# Move and rename AppImage
-if [ "$APPIMAGE" != "$RENAMED_APPIMAGE" ]; then
-  if [ -f "$RENAMED_APPIMAGE" ]; then
-    error "An AppImage with name '${FILE_ID}.AppImage' already exists in $DESTDIR."
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+main() {
+  if [[ $# -lt 1 ]]; then
+    error "No AppImage file provided."
+    usage
     exit 1
   fi
-  mv "$APPIMAGE" "$RENAMED_APPIMAGE"
-  success "AppImage moved to $RENAMED_APPIMAGE"
-else
-  success "AppImage already in the correct location."
-fi
 
-# Ensure it's still executable
-if [ ! -x "$RENAMED_APPIMAGE" ]; then
-  chmod +x "$RENAMED_APPIMAGE"
-  success "Execution permission applied to $RENAMED_APPIMAGE"
-fi
+  local appimage="$1"
+  if [[ ! -f "$appimage" ]]; then
+    error "File not found: ${appimage}"
+    exit 1
+  fi
 
-# Extract icon
-log "Searching for icons in the AppImage..."
-ICON_PATH=""
+  # Make path absolute
+  appimage="$(cd "$(dirname "$appimage")" && pwd)/$(basename "$appimage")"
 
-TMPDIR="$(mktemp_dir)"
-extract_appimage_payload "$RENAMED_APPIMAGE" "$TMPDIR"
+  printf '\n%sAppImage Installer%s\n' "$BOLD" "$RESET"
+  printf '%s\n\n' "────────────────────────────────────────"
 
-FOUND_ICON="$(first_icon_in_dir "$TMPDIR" || true)"
+  check_dependencies
 
-if [ -n "$FOUND_ICON" ] && [ -f "$FOUND_ICON" ]; then
-  EXT=${FOUND_ICON##*.}
-  ICON_FILENAME="${FILE_ID}.${EXT}"
-  cp "$FOUND_ICON" "${ICONDIR}/${ICON_FILENAME}"
-  ICON_PATH="${ICONDIR}/${ICON_FILENAME}"
-  success "Icon extracted to $ICON_PATH"
-else
-  log "No icon found, fallback to name as icon."
-  ICON_PATH="$FILE_ID"
-fi
+  # --- Derive a clean default name from the filename ---
+  local filename stem default_name display_name file_id
+  filename="$(basename "$appimage")"
+  stem="${filename%%.*}"                       # drop extension(s): foo.AppImage → foo
+  default_name="$(clean_display_name "$stem")" # strip version/arch: FooBar_0.1_amd64 → FooBar
 
-rm -rf "$TMPDIR" >/dev/null 2>&1 || true
+  # --- Prompt for display name — using prompt_value to avoid subshell issues ---
+  prompt_value display_name "Application name (for system menus)" "$default_name"
+  [[ -z "$display_name" ]] && display_name="$default_name"
 
-# Create .desktop file
-# Notes:
-# - Use absolute path for Icon when extracted.
-# - Exec wraps the AppImage with appimage-run (or chosen runner).
-cat > "$DESKTOP_FILE" <<EOF
+  file_id="$(sanitize_id "$display_name")"
+  [[ -z "$file_id" ]] && file_id="$(sanitize_id "$default_name")"
+
+  local dest_appimage="${DESTDIR}/${file_id}.AppImage"
+  local desktop_file="${APPDIR}/${file_id}.desktop"
+
+  printf '\n'
+  log "Name     : ${display_name}"
+  log "ID       : ${file_id}"
+  log "AppImage : ${dest_appimage}"
+  log "Desktop  : ${desktop_file}"
+  printf '\n'
+
+  mkdir -p "$APPDIR" "$ICONDIR" "$DESTDIR"
+
+  # --- Make executable ---
+  if [[ ! -x "$appimage" ]]; then
+    chmod +x "$appimage"
+    success "Made executable: ${appimage}"
+  fi
+
+  # --- Move / rename ---
+  if [[ "$appimage" != "$dest_appimage" ]]; then
+    if [[ -f "$dest_appimage" ]]; then
+      error "'${file_id}.AppImage' already exists in ${DESTDIR}."
+      if prompt_yn "Overwrite? [y/N]"; then
+        rm -f "$dest_appimage"
+      else
+        exit 1
+      fi
+    fi
+    mv "$appimage" "$dest_appimage"
+    success "Moved to: ${dest_appimage}"
+  else
+    success "AppImage already in the correct location."
+  fi
+
+  [[ ! -x "$dest_appimage" ]] && chmod +x "$dest_appimage"
+
+  # --- Extract icon ---
+  local icon_path="${file_id}"
+  log "Extracting icon from AppImage..."
+  TMPWORK="$(make_tmpdir)"
+  extract_appimage_payload "$dest_appimage" "$TMPWORK"
+
+  local found_icon
+  found_icon="$(first_icon_in_dir "$TMPWORK")"
+
+  if [[ -n "$found_icon" && -f "$found_icon" ]]; then
+    local ext="${found_icon##*.}"
+    cp "$found_icon" "${ICONDIR}/${file_id}.${ext}"
+    icon_path="${ICONDIR}/${file_id}.${ext}"
+    success "Icon saved: ${icon_path}"
+  else
+    warn "No icon found — using name as icon fallback."
+  fi
+
+  # --- Build Exec line ---
+  local exec_line
+  if [[ -n "$APPIMAGE_EXEC" ]]; then
+    exec_line="${APPIMAGE_EXEC} \"${dest_appimage}\""
+  else
+    exec_line="\"${dest_appimage}\""
+  fi
+
+  # --- Write .desktop ---
+  cat > "$desktop_file" <<EOF
 [Desktop Entry]
-Name=${DISPLAY_NAME}
-Exec=${APPIMAGE_EXEC} "${RENAMED_APPIMAGE}"
-Icon=${ICON_PATH}
+Name=${display_name}
+Exec=${exec_line}
+Icon=${icon_path}
 Type=Application
 Categories=Utility;
 Terminal=false
+StartupNotify=true
 EOF
+  success ".desktop created: ${desktop_file}"
 
-success ".desktop launcher created at $DESKTOP_FILE"
-
-# Optional edit
-prompt "Do you want to manually edit the .desktop file? [y/N]:"
-read_line EDIT_DESKTOP
-case "${EDIT_DESKTOP:-}" in
-  y|Y)
-    editor="${EDITOR:-nano}"
-    if have_cmd "$editor"; then
-      "$editor" "$DESKTOP_FILE"
-    else
-      warn "EDITOR '$editor' not found; falling back to nano if available."
-      if have_cmd nano; then
-        nano "$DESKTOP_FILE"
-      else
-        warn "No editor found. Skipping manual edit."
-      fi
+  # --- Optionally edit .desktop ---
+  printf '\n'
+  if prompt_yn "Open the .desktop file in your editor? [y/N]"; then
+    local editor="${EDITOR:-}"
+    if [[ -z "$editor" ]]; then
+      for e in nano vim vi micro; do
+        if have_cmd "$e"; then editor="$e"; break; fi
+      done
     fi
-    ;;
-  *)
-    ;;
-esac
+    if [[ -n "$editor" ]] && have_cmd "$editor"; then
+      "$editor" "$desktop_file" </dev/tty
+    else
+      warn "No suitable editor found. Set \$EDITOR to your preferred editor."
+    fi
+  fi
 
-# Update desktop database (optional)
-if have_cmd update-desktop-database; then
-  update-desktop-database "$APPDIR" >/dev/null 2>&1 || true
-fi
+  # --- Update desktop database ---
+  if have_cmd update-desktop-database; then
+    update-desktop-database "$APPDIR" &>/dev/null || true
+    log "Desktop database updated."
+  fi
 
-success "${DISPLAY_NAME} was successfully installed and integrated."
+  printf '\n%s\n' "────────────────────────────────────────"
+  success "${display_name} installed and integrated successfully."
+  printf '\n'
+}
 
+main "$@"
